@@ -4,16 +4,23 @@
 #include <string.h>
 #include <pthread.h>
 #include <netinet/udp.h>
-#include <netinet/tcp.h>
 #include <netinet/ip.h>
 #include <net/ethernet.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <signal.h>
-#include <sys/msg.h>
 #include "main.h"
 #include <arpa/inet.h>
 #include <getopt.h>
+#include <mqueue.h>
+#include <fcntl.h>
+
+#define SERVER_QUEUE_NAME   "/udp-server"
+#define QUEUE_PERMISSIONS 0660
+#define MAX_MESSAGES 10
+#define MAX_MSG_SIZE 256
+#define MSG_BUFFER_SIZE (MAX_MSG_SIZE + 10)
+
+_Bool snd_switch;
 int main(int argc, char *argv[] )
 {
     if( argc != 0 ) {
@@ -25,7 +32,6 @@ int main(int argc, char *argv[] )
                 { "dest_port", required_argument, NULL, 'D' },
                 { NULL, 0, NULL, 0}
         };
-
         int rez = 0;
         while ((rez = getopt_long(argc, argv, short_options, long_options, NULL)) != -1) {
             switch (rez) {
@@ -44,27 +50,22 @@ int main(int argc, char *argv[] )
                         perror("Invalid IP in dest argument");
                         return 0;
                     }
-                    printf("found argument \"b = %s\".\n", optarg);
                     break;
                 case 'C':
                     conf = 1;
                     sp_check = 1;
-                    fsource_port = atoi(optarg);
-                    if ( fsource_port == 0 ) {
+                    if ( fsource_port = atoi(optarg) ) {
                         perror("Invalid port number in source_port argument");
                         return 0;
                     };
-                    printf("found argument \"C = %d\".\n", fsource_port);
                     break;
                 case 'D':
                     conf = 1;
                     dp_check = 1;
-                    fdest_port = atoi(optarg);
-                    if ( fdest_port == 0 ) {
+                    if ( fdest_port = atoi(optarg) ) {
                         perror("Invalid port number in dest_port argument");
                         return 0;
                     };
-                    printf("found argument \"D = %d\".\n", fdest_port);
                     break;
                 case '?':
                     printf("usage: udp-stat [ --source SOURCE_IP --dest DESTINATION_IP --source_port SOURCE_PORT --dest_port DESTINATION_PORT ] \n"
@@ -77,26 +78,18 @@ int main(int argc, char *argv[] )
             } // switch
         } // while
     }
-    logfile = fopen("log.txt", "w");
-    if ( logfile == NULL ) {
-        printf("Unable to create log.txt file.\n");
-    }
     printf("Starting...\n");
 
-    key_t ipc_key;
-    if ( (ipc_key = ftok("/tmp", 137)) == (key_t) -1 ) {
-        perror("IPC error: ftok\n");
-        exit(1);
-    }
-    if (( msqid = msgget(ipc_key, 0644 | IPC_CREAT)) == -1) {
-        perror("msgget error\n");
-        exit(1);
-    }
-
     pthread_t sock_read, stat;
-
-    int iret1 = pthread_create(&sock_read, NULL, netw, NULL);
-    int iret2 = pthread_create(&stat, NULL, stat_collector, NULL);
+    int iret1, iret2;
+    if ( (iret1 = pthread_create(&sock_read, NULL, netw, NULL)) != 0 ) {
+        fprintf(stderr, "pthread error: socket, error code %d", iret1);
+        exit(1);
+    }
+    if ( (iret2 = pthread_create(&stat, NULL, stat_collector, NULL)) != 0 ) {
+        fprintf(stderr, "pthread error: statistics, error code %d", iret2);
+        exit(1);
+    }
 
     pthread_join(sock_read, NULL);
     pthread_join(stat, NULL);
@@ -114,7 +107,6 @@ void *netw()
     unsigned char *buffer = (unsigned char *) malloc(65536);
 
     int sock_raw = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-
     if ( sock_raw < 0 ) {
         perror("Socket Error\n");
     }
@@ -124,17 +116,14 @@ void *netw()
         data_size = recvfrom(sock_raw, buffer, 65536, 0, &saddr,
                                     (socklen_t *) &saddr_size);
         if (data_size < 0) {
-            perror("Recvfrom error , failed to get packets\n");
+            perror("Recvfrom error, failed to get packets\n");
             exit(1);
         }
 
         struct iphdr *iph = (struct iphdr *) (buffer + sizeof(struct ethhdr));
         if (iph->protocol == 17) {
             if ( conf == 0 ) {
-                struct ipc_msg nmsg = {2, {1, data_size}};
-                if (msgsnd(msqid, &nmsg, sizeof(struct msg_data), 0) == -1) {
-                    perror("Failure to transfer data\n");
-                }
+                snd_switch = 1;
             }
             else {
                 unsigned short iphdrlen = iph->ihl * 4;
@@ -144,14 +133,11 @@ void *netw()
                 memset(&source, 0, sizeof(source));
                 dest.sin_addr.s_addr = iph->daddr;
 
-                if ( !( s_check == 1 && !(fsource.sin_addr.s_addr == source.sin_addr.s_addr))  &&
-                        !( d_check == 1 && !(fdest.sin_addr.s_addr == dest.sin_addr.s_addr) ) &&
-                        !( sp_check == 1 && !(fsource_port == ntohs(udph->source)) ) &&
-                        !( dp_check == 1 && !(fdest_port == ntohs(udph->dest)) )){
-                    struct ipc_msg nmsg = {2, {0, data_size}};
-                    if (msgsnd(msqid, &nmsg, sizeof(struct msg_data), 0) == -1) {
-                        perror("Failure to transfer data\n");
-                    }
+                if ( !( s_check == 1 && (fsource.sin_addr.s_addr != source.sin_addr.s_addr))  &&
+                        !( d_check == 1 && (fdest.sin_addr.s_addr != dest.sin_addr.s_addr) ) &&
+                        !( sp_check == 1 && (fsource_port != ntohs(udph->source)) ) &&
+                        !( dp_check == 1 && (fdest_port != ntohs(udph->dest)) )){
+                    snd_switch = 1;
                 }
             }
         }
@@ -161,21 +147,42 @@ void *netw()
 
 void *stat_collector()
 {
-    long total_size = 0;
-    struct ipc_msg mark;
+    mqd_t qd_server, qd_client;
 
+    struct mq_attr attr;
+    attr.mq_flags = 0;
+    attr.mq_maxmsg = MAX_MESSAGES;
+    attr.mq_msgsize = MAX_MSG_SIZE;
+    attr.mq_curmsgs = 0;
+
+    if ( (qd_server = mq_open (SERVER_QUEUE_NAME, O_RDONLY | O_CREAT | O_NONBLOCK, QUEUE_PERMISSIONS, &attr) ) == -1) {
+        perror ("Server: mq_open (server)");
+        exit (1);
+    }
+    char in_buffer[MSG_BUFFER_SIZE];
+
+    long total_size = 0;
     while (1) {
-        if (msgrcv(msqid, &mark, sizeof(struct msg_data), -3, 0) != -1) {
-            if ( mark.mtype == 2 ) {
-                ++udp;
-                total_size = total_size + mark.datats.total_size;
+        if (mq_receive (qd_server, in_buffer, MSG_BUFFER_SIZE, NULL) != -1) {
+            printf ("Server: message received.\n");
+            // send reply message to client
+            if ((qd_client = mq_open (in_buffer, O_WRONLY)) == 1) {
+                perror ("Unable to open client queue");
+                continue;
             }
-            else if ( mark.mtype == 3) {
-                struct ipc_msg nmsg = {5, {udp, total_size}};
-                if (msgsnd(msqid, &nmsg, sizeof(struct msg_data), 0) == -1) {
-                    perror("Failure to transfer data\n");
-                }
+            //sprintf (out_buffer, "%ld", token_number);
+            msgt out_buffer = {udp, total_size};;
+            if (mq_send (qd_client, (const char *) &out_buffer, sizeof(out_buffer), 0) == -1) {
+                perror ("Unable to send message to client");
+                continue;
             }
+        }
+
+        if ( snd_switch == 1 ) {
+            ++udp;
+            total_size += data_size;
+            snd_switch = 0;
+            //printf("%d |||| %ld \n", udp, total_size);
         }
     }
 }
