@@ -156,7 +156,7 @@ void *stat_collector()
     attr.mq_curmsgs = 0;
 
     if ( (qd_server = mq_open (SERVER_QUEUE_NAME, O_RDONLY | O_CREAT | O_NONBLOCK, QUEUE_PERMISSIONS, &attr) ) == -1) {
-        perror ("Server: mq_open (server)");
+        perror ("mq_open error with qd_server");
         exit (1);
     }
     char in_buffer[MSG_BUFFER_SIZE];
@@ -164,13 +164,10 @@ void *stat_collector()
     long total_size = 0;
     while (1) {
         if (mq_receive (qd_server, in_buffer, MSG_BUFFER_SIZE, NULL) != -1) {
-            printf ("Server: message received.\n");
-            // send reply message to client
             if ((qd_client = mq_open (in_buffer, O_WRONLY)) == 1) {
                 perror ("Unable to open client queue");
                 continue;
             }
-            //sprintf (out_buffer, "%ld", token_number);
             msgt out_buffer = {udp, total_size};;
             if (mq_send (qd_client, (const char *) &out_buffer, sizeof(out_buffer), 0) == -1) {
                 perror ("Unable to send message to client");
@@ -182,7 +179,6 @@ void *stat_collector()
             ++udp;
             total_size += data_size;
             snd_switch = 0;
-            //printf("%d |||| %ld \n", udp, total_size);
         }
     }
 }
