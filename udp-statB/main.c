@@ -20,7 +20,6 @@
 #define MAX_MSG_SIZE 256
 #define MSG_BUFFER_SIZE (MAX_MSG_SIZE + 10)
 
-_Bool snd_switch;
 int main(int argc, char *argv[] )
 {
     if( argc != 0 ) {
@@ -124,7 +123,7 @@ void *netw()
         struct iphdr *iph = (struct iphdr *) (buffer + sizeof(struct ethhdr));
         if (iph->protocol == 17) {
             if ( conf == 0 ) {
-                snd_switch = 1;
+                ++udp;
                 total_size += data_size;
             }
             else {
@@ -139,7 +138,7 @@ void *netw()
                      !( d_check == 1 && (fdest.sin_addr.s_addr != dest.sin_addr.s_addr) ) &&
                      !( sp_check == 1 && (fsource_port != ntohs(udph->source)) ) &&
                      !( dp_check == 1 && (fdest_port != ntohs(udph->dest)) )){
-                    snd_switch = 1;
+                    ++udp;
                     total_size += data_size;
                 }
             }

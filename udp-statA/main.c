@@ -20,7 +20,6 @@
 #define MAX_MSG_SIZE 256
 #define MSG_BUFFER_SIZE (MAX_MSG_SIZE + 10)
 
-_Bool snd_switch;
 int main(int argc, char *argv[] )
 {
     if( argc != 0 ) {
