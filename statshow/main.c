@@ -19,7 +19,7 @@ typedef struct msgt
 int main()
 {
     char client_queue_name [64];
-    mqd_t qd_server, qd_client;   // queue descriptors
+    mqd_t qd_server, qd_client;   
 
     sprintf (client_queue_name, "/udp-client-%d", getpid ());
 
@@ -41,7 +41,7 @@ int main()
     }
 
     msgt in_buffer;
-
+    printf("Packets received | Total size\n");
     while (1) {
         if (mq_send (qd_server, client_queue_name, strlen (client_queue_name) + 1, 0) == -1) {
             perror ("Client: Not able to send message to server");
@@ -52,7 +52,7 @@ int main()
             perror ("Client: mq_receive");
             exit (1);
         }
-        printf ("%ld ////// %ld\n", in_buffer.numb, in_buffer.w);
+        printf("%-16ld | %-5ld \n", in_buffer.numb, in_buffer.w);
         sleep(2);
     }
 
@@ -65,6 +65,5 @@ int main()
         perror ("Client: mq_unlink");
         exit (1);
     }
-    printf ("Client: bye\n");
     exit (0);
 }
