@@ -19,7 +19,11 @@ udp-statistics - набор утилит для Debian для сбора ста�
 
 При необходимости для сборки deb-пакета запустить:
 ```sh
-make deb
+~$ make deb
+```
+Результатом будет файл *udp-statistics_0.4.0_amd64.deb*, для установки которого необходимо выполнить команду:
+```sh
+~$ sudo dpkg -i udp-statistics_0.4.0_amd64.deb
 ```
 
 ## Запуск
@@ -36,7 +40,7 @@ dest_port: destination port
 ```
 Например:
 ```sh
-~$ udp-statA -A --interface enp0s3 --dest 127.0.0.1 --dest_port 17 
+~$ sudo udp-stat -A --interface enp0s3 --dest 127.0.0.1 --dest_port 17 
 Using version A
 Starting
 ```
@@ -44,7 +48,7 @@ Starting
 
 udp-statshow не использует никаких дополнительных аргументов при запуске.
 ```sh
-~$ udp-statshow 
+~$ sudo udp-statshow 
 ```
 После запуска утилита будет с периодом в 2 с. выводить получаемые данные (количество и размер пакетов) на экран.
 
@@ -64,7 +68,7 @@ src_ip=20.20.20.21, dst_ip=20.20.20.22, src_port=5566, dst_port=1022, ether_type
 src_ip=10.0.0.1, dst_ip=10.0.0.2, src_port=12312, dst_port=514, ether_type=ipv4
 ```
 
-С помощью https://github.com/cslev/pcap_generator сгенерировать набор пакетов: 
+С помощью https://github.com/cslev/pcap_generator сгенерируем набор пакетов: 
 ```sh
 ~$ git clone https://github.com/cslev/pcap_generator.git
 ~$ cd pcap_generator
