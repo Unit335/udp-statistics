@@ -1,0 +1,5 @@
+Package: udp-statistics
+Version: 0.4.0
+Architecture: amd64
+Maintainer: Ilya DUbovskii <idubovskii@outlook.com>
+Description: Consists of two tools: udp-stat which collects number and size of incoming UDP packets based on filters and udp-statshow which displays collected data.
