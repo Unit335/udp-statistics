@@ -63,11 +63,11 @@ src_ip=10.0.0.1, dst_ip=10.0.0.2, src_port=12312, dst_port=514, ether_type=ipv4
 ```sh
 ~$ git clone https://github.com/cslev/pcap_generator.git
 ~$ cd pcap_generator
-~$ ./pcap_generator_from_csv.py -i input.csv -o udp-packets.pcap -v
+~$ ./pcap_generator_from_csv.py -i input.csv -o o_vg.pcap -v
 ```
 И отправить пакеты направить пакеты с помощью tcpreplay на произвольный интерфейс
 ```
-~$ sudo tcpreplay -i enp0s3 udp-packets.64bytes.pcap
+~$ sudo tcpreplay -i enp0s3 o_vg.pcap.64bytes.pcap
 ``` 
 Утилита udp-statshow отобразит пакеты, соответствующие указанным фильтрам (в данном случае 2 пакета на 120 байт).
 
