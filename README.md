@@ -72,23 +72,43 @@ src_ip=10.0.0.1, dst_ip=10.0.0.2, src_port=12312, dst_port=514, ether_type=ipv4
 Утилита udp-statshow отобразит пакеты, соответствующие указанным фильтрам (в данном случае 2 пакета на 120 байт).
 
 ## Профилирование
-Для профилирования использовалась утилита perf. По итогам второй вариант **udp-statB** оказался существенно более эффективным. Время выполнения у потока анализа пакетов у двух вариантов было примерно одинаковых (в пределах доль миллисекунд при анализе на промежутке в 20с), при этом суммарное время выполнения задач второй утилиты было существенно меньше (1-1.5 msec к 16-18к msec у первой), т.к. в данном случае нет необходимости осуществлять отдельно передачу данных между потоками. 
+Для профилирования использовалась утилита perf. По итогам с точки зрения скорости обработки пакетов наиболее эффективным оказался вариант A, с точки зрения общего времени работы программы - вариант B. Измерения приводилось относительно набора пакетов, представленного ранее для тестирования, повторенного 20 раз, никаких дополнительных фильтров в утилите не использовалось.
 
-Данные по вариантам A и B при передаче 6 UDP пакетов:
+for i in {1..20}
+do
+ sudo tcpreplay -i enp0s3 o_vg.pcap.64bytes.pcap 
+done
+
+Данные по скорости потоков анализа пакето:
+Вариант A
 ```sh
-~$ sudo perf stat -p 3247 sleep 10 
-
- Performance counter stats for process id '3247':
-         10 005,72 msec task-clock                #    0,999 CPUs utilized          
-               128      context-switches          #    0,013 K/sec                  
-                 0      cpu-migrations            #    0,000 K/sec                  
+~$ sudo perf stat -t 4626 sleep 10 
+ Performance counter stats for thread id '4626':
+              0,87 msec task-clock                #    0,000 CPUs utilized          
+               120      context-switches          #    0,138 M/sec   
 ```
 Вариант B
 ```sh
-~$ sudo perf stat -p 3546 sleep 10 
-              0,17 msec task-clock                #    0,000 CPUs utilized          
-                 6      context-switches          #    0,036 M/sec                  
-                 0      cpu-migrations            #    0,000 K/sec                  
+~$ sudo perf stat -t 4526 sleep 10 
+ Performance counter stats for thread id '4526':
+              1,11 msec task-clock                #    0,000 CPUs utilized          
+               120      context-switches          #    0,108 M/sec  
+```
+
+Данные по работе процессов A и B при передаче 6 UDP пакетов:
+Вариант A
+```sh
+~$ sudo perf stat -p 4467 sleep 10 
+ Performance counter stats for process id '4467':
+          9 903,09 msec task-clock                #    0,990 CPUs utilized          
+               557      context-switches          #    0,056 K/sec                   
+```
+Вариант B
+```sh
+~$ sudo perf stat -p 4525 sleep 10 
+ Performance counter stats for process id '4525':
+              2,08 msec task-clock                #    0,000 CPUs utilized          
+               123      context-switches          #    0,059 M/sec                    
 ```
 
 ## Авторство и лицензия
