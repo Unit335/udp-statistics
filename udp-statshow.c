@@ -21,20 +21,17 @@ char client_queue_name [MAX_QUEUE_NAME];
 mqd_t qd_server, qd_client;
 
 
-void closing_handler() {
+void closing_handler() 
+{
     printf("\nCLosing\n");
-    /* Done with queue, so close it */
-
     if (mq_close (qd_client) == -1) {
         perror ("Client: mq_close");
         exit (1);
     }
-
     if (mq_unlink (client_queue_name) == -1) {
         perror ("Client: mq_unlink");
         exit (1);
     }
-
     exit(0);
 }
 

@@ -18,44 +18,40 @@
 #include <sys/ioctl.h>
 #include "udpstat.h"
 
-int sock_raw;
-void closing_handler() {
-    printf("\nCLosing\n");
-    if ( mq_close(qd_server) == -1) {
-        perror("mq_close (qd_close) error: ");
-    }
-    if ( mq_close(qd_client) == -1 )
-        perror("mq_close (qd_client) error: ");
-    if ( mq_unlink(SERVER_QUEUE_NAME) == -1 )
-        perror("mq_unlink (qd_client) error: ");
-
-    close(sock_raw);
-    exit(0);
+void closing_handler() 
+{
+    printf("\nClosing...\n");
+    pthread_cancel(sock_read);
+    pthread_cancel(stat);
 }
 
 int main(int argc, char *argv[] )
 {
     signal(SIGINT, closing_handler);
 
-    parse_cmdline(argc, argv);
+    if ( parse_cmdline(argc, argv) == 1)
+        return 1;
     printf("Starting...\n");
 
-    pthread_t sock_read, stat;
-    int retcode;
+    int retcode, retcode_stat;
     if ((retcode = pthread_create(&sock_read, NULL, start_function, NULL)) != 0 ) {
         fprintf(stderr, "pthread_create (sock_read): (%d)%s\n", retcode, strerror(retcode));
-        exit(1);
+        return 1;
     }
     if ((retcode = pthread_create(&stat, NULL, stat_function, NULL)) != 0 ) {
         fprintf(stderr, "pthread_create (stat): (%d)%s\n", retcode, strerror(retcode));
-        exit(1);
+        return 1;
     }
-    
-    pthread_join(sock_read, NULL);
-    pthread_join(stat, NULL);
-    
-
-    return 0;
+    int main_retcode = 0;
+    void *socket_retcode;
+    void *stat_retcode;
+    pthread_join(sock_read, &socket_retcode);
+    pthread_join(stat, &stat_retcode);
+    if ( (intptr_t)socket_retcode == 1 )
+        main_retcode = 1;
+    if ( (intptr_t)stat_retcode == 1 )
+        main_retcode = 1;
+    return main_retcode;
 }
 
 
@@ -64,11 +60,15 @@ void *packet_filtering_threadA()
     int saddr_size;
     struct sockaddr saddr;
     unsigned char *buffer = (unsigned char *) malloc(PACKET_SIZE);
+    pthread_cleanup_push(free, buffer);
 
     sock_raw = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if ( sock_raw < 0 ) {
         perror("Socket Error\n");
+        pthread_exit((void *)1);
     }
+    void *pointer = &sock_raw;
+    pthread_cleanup_push(socket_close, NULL);
 
     if ( interface[0] != '\0' ) {
         struct ifreq ifr;
@@ -77,17 +77,17 @@ void *packet_filtering_threadA()
         snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), interface);
         if (setsockopt(sock_raw, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) == -1) {
             perror("Failure to bind socket to interface");
-            exit(1);
+            pthread_exit((void *)1);
         }
     }
-    while (1) {
+    while (run_switch) {
         saddr_size = sizeof saddr;
 
         data_size = recvfrom(sock_raw, buffer, PACKET_SIZE, 0, &saddr,
                              (socklen_t *) &saddr_size);
         if (data_size < 0) {
             perror("Recvfrom error, failed to get packets\n");
-            exit(1);
+            pthread_exit((void *)1);
         }
 
         struct iphdr *iph = (struct iphdr *) (buffer + sizeof(struct ethhdr));
@@ -115,13 +115,13 @@ void *packet_filtering_threadA()
             }
         }
     }
-    close(sock_raw);
+    pthread_cleanup_pop(1);
+    pthread_cleanup_pop(1);
+    pthread_exit((void *)0);
 }
 
 void *stat_collectorA()
 {
-    mqd_t qd_server, qd_client;
-
     struct mq_attr attr;
     attr.mq_flags = 0;
     attr.mq_maxmsg = MAX_MESSAGES;
@@ -130,17 +130,18 @@ void *stat_collectorA()
 
     if ( (qd_server = mq_open (SERVER_QUEUE_NAME, O_RDONLY | O_CREAT | O_NONBLOCK, QUEUE_PERMISSIONS, &attr) ) == -1) {
         perror ("mq_open error with qd_server");
-        exit (1);
+        pthread_exit((void *)1);
     }
+    pthread_cleanup_push(mqueues_close, NULL);
 
     long total_size = 0;
-    while (1) {
+    while (run_switch) {
         if (mq_receive (qd_server, in_buffer, MAX_QUEUE_NAME, NULL) != -1) {
-            if ((qd_client = mq_open (in_buffer, O_WRONLY)) == 1) {
-                perror ("Unable to open client queue");
+            if ((qd_client = mq_open(in_buffer, O_WRONLY)) == 1) {
+                perror("Unable to open client queue");
                 continue;
             }
-            msgt out_buffer = {udp, total_size};;
+            msgt out_buffer = {udp, total_size};
             if (mq_send (qd_client, (const char *) &out_buffer, sizeof(out_buffer), 0) == -1) {
                 perror ("Unable to send message to client");
                 continue;
@@ -153,6 +154,8 @@ void *stat_collectorA()
             snd_switch = 0;
         }
     }
+    pthread_cleanup_pop(1);
+    pthread_exit((void *)0);
 }
 
 void *packet_filtering_threadB()
@@ -161,11 +164,14 @@ void *packet_filtering_threadB()
     int saddr_size;
     struct sockaddr saddr;
     unsigned char *buffer = (unsigned char *) malloc(PACKET_SIZE);
+    pthread_cleanup_push(free, buffer);
 
     sock_raw = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if ( sock_raw < 0 ) {
-        perror("Socket Error\n");
+        perror("Socket Error");
+        pthread_exit((void *)1);
     }
+    pthread_cleanup_push(socket_close, NULL);
 
     if ( interface[0] != '\0' ) {
         struct ifreq ifr;
@@ -174,17 +180,17 @@ void *packet_filtering_threadB()
         snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), interface);
         if (setsockopt(sock_raw, SOL_SOCKET, SO_BINDTODEVICE, (void *)&ifr, sizeof(ifr)) == -1) {
             perror("Failure to bind socket to interface");
-            exit(1);
+            pthread_exit((void *)1);
         }
     }
 
-    while (1) {
+    while (run_switch) {
         saddr_size = sizeof saddr;
         data_size = recvfrom(sock_raw, buffer, PACKET_SIZE, 0, &saddr,
                              (socklen_t *) &saddr_size);
         if (data_size < 0) {
-            perror("Recvfrom error, failed to get packets\n");
-            exit(1);
+            perror("Recvfrom error, failed to get packets");
+            pthread_exit((void *)1);
         }
         struct iphdr *iph = (struct iphdr *) (buffer + sizeof(struct ethhdr));
         if (iph->protocol == 17) {
@@ -210,14 +216,14 @@ void *packet_filtering_threadB()
             }
         }
     }
-    close(sock_raw);
+    pthread_cleanup_pop(1);
+    pthread_cleanup_pop(1);
+    pthread_exit((void *)0);
 }
 
 
 void *stat_collectorB()
 {
-    mqd_t qd_client;
-
     struct mq_attr attr;
     attr.mq_flags = 0;
     attr.mq_maxmsg = MAX_MESSAGES;
@@ -226,10 +232,11 @@ void *stat_collectorB()
 
     if ( (qd_server = mq_open (SERVER_QUEUE_NAME, O_RDONLY | O_CREAT, QUEUE_PERMISSIONS, &attr) ) == -1) {
         perror ("mq_open error with qd_server");
-        exit (1);
+        run_switch = 0;
+        pthread_exit((void *)1);
     }
-
-    while (1) {
+    pthread_cleanup_push(mqueues_close, NULL);
+    while (run_switch) {
         if ( mq_receive (qd_server, in_buffer, MAX_QUEUE_NAME, NULL) != -1 ) {
             if ( (qd_client = mq_open (in_buffer, O_WRONLY) ) == 1) {
                 perror ("Unable to open client queue");
@@ -242,9 +249,11 @@ void *stat_collectorB()
             }
         }
     }
+    pthread_cleanup_pop(1);
+    pthread_exit((void *)0);
 }
 
-void parse_cmdline(int argc, char *argv[])
+int parse_cmdline(int argc, char *argv[])
 {
     if( argc != 0 ) {
         const char* short_options = "ABR:T:Y:U:";
@@ -274,7 +283,7 @@ void parse_cmdline(int argc, char *argv[])
                 case 'I':
                     if ( (sizeof(interface) - 1) > 15 ) {
                         perror("Invalid interface name: string too long");
-                        exit(1);
+                        return 1;
                     }
                     strncpy(interface, optarg, 16);
                     break;
@@ -283,7 +292,7 @@ void parse_cmdline(int argc, char *argv[])
                     s_check = 1;
                     if ( inet_pton(AF_INET, optarg, &(fsource.sin_addr)) <= 0 ) {
                         perror("Invalid IP in source argument");
-                        exit(1);
+                        return 1;
                     }
                     break;
                 case 'T':
@@ -291,7 +300,7 @@ void parse_cmdline(int argc, char *argv[])
                     d_check = 1;
                     if ( inet_pton(AF_INET, optarg, &(fdest.sin_addr)) <= 0 ) {
                         perror("Invalid IP in dest argument");
-                        exit(1);
+                        return 1;
                     }
                     break;
                 case 'Y':
@@ -299,7 +308,7 @@ void parse_cmdline(int argc, char *argv[])
                     sp_check = 1;
                     if ( (fsource_port = atoi(optarg)) == 0 ) {
                         perror("Invalid port number in source_port argument");
-                        exit(1);
+                        return 1;
                     };
                     break;
                 case 'U':
@@ -307,7 +316,7 @@ void parse_cmdline(int argc, char *argv[])
                     dp_check = 1;
                     if ( (fdest_port = atoi(optarg)) == 0 ) {
                         perror("Invalid port number in dest_port argument");
-                        exit(1);
+                        return 1;
                     };
                     break;
                 case '?':
@@ -318,8 +327,20 @@ void parse_cmdline(int argc, char *argv[])
                            "source_port: source port\n"
                            "dest_port: destination port\n"
                            "Example: udp-stat -A --interface enp0s3 --source 192.150.3.1 -source_port 80\n");
-                    exit(1);
+                    return 1;
             }
         }
     }
+}
+
+void socket_close() { close(sock_raw); }
+void mqueues_close()
+{
+    if ( mq_close(qd_server) == -1) {
+        perror("mq_close (qd_close) error: ");
+    }
+    if ( mq_close(qd_client) == -1 )
+        perror("mq_close (qd_client) error: ");
+    if ( mq_unlink(SERVER_QUEUE_NAME) == -1 )
+        perror("mq_unlink (qd_client) error: ");
 }

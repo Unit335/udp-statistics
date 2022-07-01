@@ -10,8 +10,14 @@
 #define MAX_QUEUE_NAME 256
 #define MSG_BUFFER_SIZE (MAX_MSG_SIZE + 10)
 
+pthread_t sock_read, stat;
 void closing_handler();
-void parse_cmdline(int argc, char *argv[]);
+_Bool run_switch = 1;
+
+int parse_cmdline(int argc, char *argv[]);
+
+void socket_close();
+void mqueues_close();
 
 void *packet_filtering_threadA();
 void *stat_collectorA();
@@ -21,8 +27,11 @@ void *stat_collectorB();
 void (*start_function) = &packet_filtering_threadA;
 void (*stat_function) = &stat_collectorA;
 
+int sock_raw;
+
 _Bool snd_switch = 0;
 int data_size;
+mqd_t qd_server, qd_client;
 
 _Bool conf = 0;
 _Bool s_check = 0, d_check = 0, sp_check = 0, dp_check = 0;
@@ -35,7 +44,6 @@ struct sockaddr_in source, dest;
 int udp = 0;
 long total_size = 0;
 
-mqd_t qd_server, qd_client;
 char in_buffer[MAX_QUEUE_NAME];
 typedef struct msgt
 {
